@@ -1,68 +1,91 @@
 <?php namespace Howlowck\OAuth2\Client\Provider;
 
 use League\OAuth2\Client\Provider\AbstractProvider;
+use League\OAuth2\Client\Provider\Exception\IdentityProviderException;
 use League\OAuth2\Client\Token\AccessToken;
-use League\OAuth2\Client\Entity\User;
+use League\OAuth2\Client\Tool\ArrayAccessorTrait;
+use League\OAuth2\Client\Tool\BearerAuthorizationTrait;
+use Psr\Http\Message\ResponseInterface;
 
 class Meetup extends AbstractProvider {
-    public $scopes = array();
-    public $responseType = 'json';
-
-    public function urlAuthorize()
+    use ArrayAccessorTrait,
+        BearerAuthorizationTrait;
+    
+    /**
+     * Get authorization url to begin OAuth flow
+     *
+     * @return string
+     */
+    public function getBaseAuthorizationUrl()
     {
         return 'https://secure.meetup.com/oauth2/authorize';
     }
-
-    public function urlAccessToken()
+    
+    /**
+     * Get access token url to retrieve token
+     *
+     * @return string
+     */
+    public function getBaseAccessTokenUrl(array $params)
     {
         return 'https://secure.meetup.com/oauth2/access';
     }
-
-    public function urlUserDetails(AccessToken $token)
+    
+    /**
+     * Get provider url to fetch user details
+     *
+     * @param  AccessToken $token
+     *
+     * @return string
+     */
+    public function getResourceOwnerDetailsUrl(AccessToken $token)
     {
-        return 'https://api.meetup.com/2/members?member_id=self&access_token='.$token;
+        return 'https://api.meetup.com/2/members';
     }
-
-    public function userDetails($response, AccessToken $token)
+    
+    /**
+     * Get the default scopes used by this provider.
+     *
+     * This should not be a complete list of all scopes, but the minimum
+     * required for the provider user interface!
+     *
+     * @return array
+     */
+    protected function getDefaultScopes()
     {
-        if ( ! isset($response->results[0])) {
-            return null;
-        }
-
-        $result = $response->results[0];
-        $user = new User;
-
-
-        $name = (isset($result->name)) ? $result->name : null;
-        $description = (isset($result->bio)) ? $result->bio : null;
-        $imageUrl = (isset($result->photo->photo_link)) ? $result->photo->photo_link : null;
-        $meetupLink = (isset($result->link)) ? $result->link : null;
-
-        $user->exchangeArray(array(
-            'uid' => $result->id,
-            'name' => $name,
-            'description' => $description,
-            'imageurl' => $imageUrl,
-            'urls' => array( 'Meetup' => $meetupLink ),
-        ));
-
-        return $user;
+        return ['basic'];
     }
-
-    public function userUid($response, AccessToken $token)
+    
+    /**
+     * Check a provider response for errors.
+     *
+     * @throws IdentityProviderException
+     * @param  ResponseInterface $response
+     * @param  string $data Parsed response data
+     * @return void
+     */
+    protected function checkResponse(ResponseInterface $response, $data)
     {
-        return $response->results[0]->id;
+        $errors = [
+            'error_description',
+            'error.message',
+        ];
+        array_map(function ($error) use ($response, $data) {
+            if ($message = $this->getValueByKey($data, $error)) {
+                throw new IdentityProviderException($message, $response->getStatusCode(), $response);
+            }
+        }, $errors);
     }
-
-    public function userEmail($response, AccessToken $token)
+    
+    /**
+     * Generate a user object from a successful user details request.
+     *
+     * @param object $response
+     * @param AccessToken $token
+     * @return League\OAuth2\Client\Provider\ResourceOwnerInterface
+     */
+    protected function createResourceOwner(array $response, AccessToken $token)
     {
-        //meetup does not give away user's email
-        return null;
-    }
-
-    public function userScreenName($response, AccessToken $token)
-    {
-        $result = $response->results[0];
-        return (isset($result->name)) ? $result->name: $result->id;
+        return new MeetupResourceOwner($response);
     }
 }
